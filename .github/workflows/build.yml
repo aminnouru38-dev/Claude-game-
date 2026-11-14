@@ -15,77 +15,104 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET SDK
+      - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
-      - name: Setup Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # Do not request the obsolete Android SDK "tools" package.
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
           accept-android-sdk-licenses: true
 
-      - name: Install .NET Android workload
+      - name: Install Android workload
         shell: pwsh
         run: dotnet workload install android
 
-      - name: Check Android SDK
+      - name: Detect project
+        id: detect
         shell: pwsh
         run: |
-          Write-Host "Android SDK: $env:ANDROID_SDK_ROOT"
-          sdkmanager --version
-          adb version
+          Write-Host "Searching project files..."
 
-      - name: Restore solution
-        shell: pwsh
-        run: |
-          $sln = Get-ChildItem -Path . -Filter *.sln -Recurse -File |
-            Select-Object -First 1
+          $projects = @(
+            Get-ChildItem -Path . -Filter *.csproj -Recurse -File |
+            Where-Object {
+              $_.FullName -notmatch '[\\/](bin|obj|\.git)[\\/]'
+            }
+          )
 
-          if (-not $sln) {
-            throw "No solution (.sln) found."
+          if ($projects.Count -eq 0) {
+            throw "No C# project found. Upload your Stride project files."
           }
 
-          "SOLUTION=$($sln.FullName)" >> $env:GITHUB_ENV
-          dotnet restore $sln.FullName
+          $selected = $null
 
-      - name: Build Android
+          foreach ($project in $projects) {
+            [xml]$xml = Get-Content $project.FullName -Raw
+
+            $frameworks = @(
+              $xml.SelectNodes(
+                "//*[local-name()='TargetFramework' or local-name()='TargetFrameworks']"
+              ) | ForEach-Object { $_.'#text' }
+            )
+
+            Write-Host "Project: $($project.FullName)"
+            Write-Host "Frameworks: $frameworks"
+
+            if (($frameworks -join ';') -match 'android') {
+              $selected = $project
+              break
+            }
+          }
+
+          if (-not $selected) {
+            throw "No Android TargetFramework found. Configure Android target in your Stride project first."
+          }
+
+          "PROJECT=$($selected.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Publish Android APK
         shell: pwsh
         run: |
-          dotnet build "$env:SOLUTION" `
+          $project = "${{ steps.detect.outputs.PROJECT }}"
+
+          dotnet publish "$project" `
             -c Release `
-            --no-restore
+            -p:AndroidPackageFormat=apk
 
-      - name: Find APK files
-        id: apk
+      - name: Collect APK
         shell: pwsh
         run: |
-          $apks = Get-ChildItem -Path . -Filter *.apk -Recurse -File |
-            Where-Object { $_.FullName -match 'bin[\\/]Release' }
+          $apks = Get-ChildItem . -Filter *.apk -Recurse -File |
+            Where-Object {
+              $_.FullName -match '[\\/]bin[\\/]Release[\\/]'
+            }
 
           if (-not $apks) {
-            throw "No APK found. Check that Android platform is enabled in the Stride project."
+            throw "APK not generated. Check Android build configuration."
           }
 
-          New-Item -ItemType Directory -Force -Path "out/apk" | Out-Null
+          New-Item -ItemType Directory -Force -Path out/apk |
+            Out-Null
 
           foreach ($apk in $apks) {
             Copy-Item $apk.FullName "out/apk/$($apk.Name)" -Force
-            Write-Host "Found APK: $($apk.FullName)"
           }
 
-      - name: Upload Android APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Stride-Android-APK
