@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Stride.Audio;
 using Stride.Core.Mathematics;
 using Stride.Engine;
 using Stride.Graphics;
@@ -27,6 +28,17 @@ namespace HorrorClown
         Vector3 playerPos;
         float yaw, pitch, flicker;
         float battery = 100f; bool lightOn = true;
+        // v2: مستويات، اختباء، بطاريات، صوت، ذكاء الوحش
+        int level = 1; float speedMul = 1f;
+        bool hidden; int hideIdx; float hiddenCatch, huntTimer, stepTimer; bool hasLast; Vector3 lastHeard;
+        readonly Vector3[] wardrobePos = { new Vector3(-8.5f, 0, -3f), new Vector3(8.5f, 0, 3f) };
+        readonly Vector3[] batPos = { new Vector3(8, 0.5f, -8), new Vector3(-8, 0.5f, 2) };
+        readonly List<Entity> bats = new List<Entity>(); readonly List<bool> batTaken = new List<bool>();
+        Sound sStep, sPickup, sScream; SoundInstance iHeart, iDrone;
+
+        Sound Snd(string n) => Content.Exists(n) ? Content.Load<Sound>(n) : null;
+        void Sfx(Sound x) { if (x == null) return; var i = x.CreateInstance(); i.Play(); }
+        static int Band(float z) => z > 0 ? 0 : (z > -5 ? 1 : 2);
         int collected;
         bool dead, won;
         Vector3 wanderTarget;
@@ -46,6 +58,8 @@ namespace HorrorClown
             BuildClown();
             BuildPlayer();
             BuildKeysAndExit();
+            BuildExtras();
+            StartAudio();
             AddLight(new Vector3(0, 2.8f, 0), new Color(255, 80, 60), 0.6f, 8);
             Ambient();
             Reset();
@@ -172,6 +186,42 @@ namespace HorrorClown
             AddLight(new Vector3(0, 1.5f, -8.8f), new Color(30, 255, 80), 1.0f, 5);
         }
 
+        void BuildExtras()
+        {
+            foreach (var w in wardrobePos)
+            {
+                Box(w + new Vector3(0, 1.0f, 0), new Vector3(0.8f, 2.0f, 1.2f), new Color(55, 35, 25), true);
+                Box(w + new Vector3(w.X < 0 ? 0.42f : -0.42f, 1.0f, 0.3f), new Vector3(0.05f, 0.25f, 0.05f), new Color(200, 170, 60), false);
+            }
+            foreach (var p in batPos)
+            {
+                var b = Make(GeometricPrimitive.Cylinder.New(GraphicsDevice, 0.3f, 0.14f, 12), new Vector3(0.3f), new Color(40, 200, 255), p);
+                b.Add(new LightComponent { Type = new LightPoint { Radius = 2.5f, Color = new ColorRgbProvider(new Color3(0.2f, 0.8f, 1f)) }, Intensity = 0.7f });
+                Entity.Scene.Entities.Add(b); bats.Add(b); batTaken.Add(false);
+            }
+        }
+
+        void StartAudio()
+        {
+            sStep = Snd("step"); sPickup = Snd("pickup"); sScream = Snd("scream");
+            var drone = Snd("drone"); var heart = Snd("heartbeat");
+            if (drone != null) { iDrone = drone.CreateInstance(); iDrone.IsLooping = true; iDrone.Volume = 0.5f; iDrone.Play(); }
+            if (heart != null) { iHeart = heart.CreateInstance(); iHeart.IsLooping = true; iHeart.Volume = 0f; iHeart.Play(); }
+        }
+
+        // الوحش يمر عبر الأبواب بين الغرف بدل الخط المستقيم
+        Vector3 NavTarget(Vector3 from, Vector3 goal)
+        {
+            int a = Band(from.Z), b = Band(goal.Z);
+            if (a == b) return goal;
+            int next = a < b ? a + 1 : a - 1;
+            float doorZ = Math.Min(a, next) == 0 ? 0f : -5f;
+            var door = new Vector3(0, 0, doorZ);
+            var d = door - new Vector3(from.X, 0, from.Z);
+            if (d.Length() < 0.8f) return new Vector3(0, 0, doorZ + (a < b ? -1.8f : 1.8f));
+            return door;
+        }
+
         void AddLight(Vector3 pos, Color c, float intensity, float radius)
         {
             var e = new Entity();
@@ -188,8 +238,11 @@ namespace HorrorClown
         }
 
         // ---------- منطق اللعبة ----------
-        void Reset()
+        void Reset(bool nextLevel = false)
         {
+            if (nextLevel) { level++; speedMul += 0.15f; } else { level = 1; speedMul = 1f; }
+            hidden = false; huntTimer = 0; hasLast = false; hiddenCatch = 0;
+            for (int i = 0; i < bats.Count; i++) { batTaken[i] = false; bats[i].Transform.Position = batPos[i]; }
             playerPos = playerStart; battery = 100f; lightOn = true; yaw = 0; pitch = 0; collected = 0; dead = false; won = false;
             clown.Transform.Position = clownStart;
             wanderTarget = clownStart;
@@ -211,31 +264,65 @@ namespace HorrorClown
             return q;
         }
 
+        void Die(Vector3 monsterPos)
+        {
+            dead = true; Sfx(sScream);
+            var d = monsterPos - playerPos; d.Y = 0;
+            yaw = (float)Math.Atan2(-d.X, -d.Z); pitch = 0.3f;     // الكاميرا تلتفت للوحش (jumpscare)
+            if (iHeart != null) iHeart.Volume = 0f;
+        }
+
         public override void Update()
         {
             float dt = (float)Game.UpdateTime.Elapsed.TotalSeconds;
+            var cp = clown.Transform.Position;
 
             if (dead || won)
             {
-                DebugText.Print(dead ? "المهرج امسكك! اضغط R لإعادة اللعب" : "هربت! اضغط R للعب مرة ثانية", new Int2(20, 20));
-                if (Input.IsKeyPressed(Keys.R)) Reset();
+                cam.Transform.Position = playerPos + new Vector3(0, 1.6f, 0);
+                cam.Transform.Rotation = Quaternion.RotationYawPitchRoll(yaw, pitch, 0);
+                DebugText.Print(dead ? "امسكك الوحش! اضغط R للبدء من جديد" : $"هربت! اضغط R للمستوى {level + 1}", new Int2(20, 20));
+                if (Input.IsKeyPressed(Keys.R)) Reset(won);
                 return;
             }
 
             // الكاميرا
-            yaw -= Input.Mouse.Delta.X * Sens * 100f / 100f * 100f / 100f;
+            yaw -= Input.Mouse.Delta.X * Sens;
             pitch = MathUtil.Clamp(pitch - Input.Mouse.Delta.Y * Sens, -1.3f, 1.3f);
             var fwd = new Vector3(-(float)Math.Sin(yaw), 0, -(float)Math.Cos(yaw));
             var right = new Vector3((float)Math.Cos(yaw), 0, -(float)Math.Sin(yaw));
 
             var dir = Vector3.Zero;
-            if (Input.IsKeyDown(Keys.W)) dir += fwd;
-            if (Input.IsKeyDown(Keys.S)) dir -= fwd;
-            if (Input.IsKeyDown(Keys.D)) dir += right;
-            if (Input.IsKeyDown(Keys.A)) dir -= right;
-            if (dir.LengthSquared() > 0) dir.Normalize();
-            float speed = Input.IsKeyDown(Keys.LeftShift) ? RunSpeed : WalkSpeed;
-            playerPos = Move(playerPos, dir * speed * dt, PlayerR);
+            if (!hidden)
+            {
+                if (Input.IsKeyDown(Keys.W)) dir += fwd;
+                if (Input.IsKeyDown(Keys.S)) dir -= fwd;
+                if (Input.IsKeyDown(Keys.D)) dir += right;
+                if (Input.IsKeyDown(Keys.A)) dir -= right;
+                if (dir.LengthSquared() > 0) dir.Normalize();
+            }
+            bool moving = dir.LengthSquared() > 0;
+            bool sprint = moving && Input.IsKeyDown(Keys.LeftShift);
+            playerPos = Move(playerPos, dir * (sprint ? RunSpeed : WalkSpeed) * dt, PlayerR);
+
+            // خطوات
+            if (moving) { stepTimer -= dt; if (stepTimer <= 0) { Sfx(sStep); stepTimer = sprint ? 0.32f : 0.5f; } }
+
+            // اختباء في الدولاب (E)
+            if (Input.IsKeyPressed(Keys.E))
+            {
+                if (hidden)
+                {
+                    hidden = false;
+                    playerPos = wardrobePos[hideIdx] + new Vector3(wardrobePos[hideIdx].X < 0 ? 1.3f : -1.3f, 0, 0);
+                }
+                else
+                {
+                    for (int w = 0; w < wardrobePos.Length; w++)
+                        if (Vector3.Distance(new Vector3(playerPos.X, 0, playerPos.Z), wardrobePos[w]) < 1.9f)
+                        { hidden = true; hideIdx = w; playerPos = wardrobePos[w]; hiddenCatch = 0; break; }
+                }
+            }
 
             cam.Transform.Position = playerPos + new Vector3(0, 1.6f, 0);
             cam.Transform.Rotation = Quaternion.RotationYawPitchRoll(yaw, pitch, 0);
@@ -245,49 +332,69 @@ namespace HorrorClown
             {
                 if (keyTaken[i]) continue;
                 keys[i].Transform.Rotation = Quaternion.RotationY((float)Game.UpdateTime.Total.TotalSeconds * 2f);
-                if (Vector3.Distance(new Vector3(playerPos.X, 0.8f, playerPos.Z), keyPos[i]) < 1.0f)
-                {
-                    keyTaken[i] = true; collected++;
-                    keys[i].Transform.Position = new Vector3(0, -100, 0);
-                }
+                if (!hidden && Vector3.Distance(new Vector3(playerPos.X, 0.8f, playerPos.Z), keyPos[i]) < 1.0f)
+                { keyTaken[i] = true; collected++; keys[i].Transform.Position = new Vector3(0, -100, 0); Sfx(sPickup); }
+            }
+            // بطاريات
+            for (int i = 0; i < bats.Count; i++)
+            {
+                if (batTaken[i]) continue;
+                if (!hidden && Vector3.Distance(new Vector3(playerPos.X, 0.5f, playerPos.Z), batPos[i]) < 1.0f)
+                { batTaken[i] = true; battery = Math.Min(100f, battery + 40f); bats[i].Transform.Position = new Vector3(0, -100, 0); Sfx(sPickup); }
             }
 
-            // المهرج
-            var cp = clown.Transform.Position;
+            // الوحش: يسمعك، يتذكر آخر مكان، ويمر عبر الأبواب
             var toP = playerPos - cp; toP.Y = 0;
             float dist = toP.Length();
-            Vector3 target; float cs;
-            float hear = Input.IsKeyDown(Keys.LeftShift) && dir.LengthSquared() > 0 ? 14f : 8f;   // الجري يصدر ضجيج
-            if (dist < hear) { target = playerPos; cs = ClownChaseSpeed; }
+            float hear = hidden ? 0f : (sprint ? 14f : (moving ? 8f : 4f));
+            if (dist < hear) { lastHeard = playerPos; hasLast = true; huntTimer = 6f; }
+
+            Vector3 goal; float cs;
+            if (huntTimer > 0 && hasLast)
+            {
+                huntTimer -= dt; goal = lastHeard; cs = ClownChaseSpeed * speedMul;
+                if (Vector3.Distance(cp, lastHeard) < 1.2f) huntTimer = Math.Min(huntTimer, 1.5f);   // وصل للمكان وما لقاك
+            }
             else
             {
                 if (Vector3.Distance(cp, wanderTarget) < 1f)
                     wanderTarget = new Vector3((float)(rnd.NextDouble() * 16 - 8), 0, (float)(rnd.NextDouble() * 16 - 8));
-                target = wanderTarget; cs = ClownSpeed;
+                goal = wanderTarget; cs = ClownSpeed * speedMul;
             }
-            var cd = target - cp; cd.Y = 0;
-            if (cd.LengthSquared() > 0.01f)
+            var step = NavTarget(cp, goal) - cp; step.Y = 0;
+            if (step.LengthSquared() > 0.01f)
             {
-                cd.Normalize();
-                cp = Move(cp, cd * cs * dt, ClownR);
+                step.Normalize();
+                cp = Move(cp, step * cs * dt, ClownR);
                 clown.Transform.Position = cp;
-                clown.Transform.Rotation = Quaternion.RotationY((float)Math.Atan2(-cd.X, -cd.Z));
+                clown.Transform.Rotation = Quaternion.RotationY((float)Math.Atan2(-step.X, -step.Z));
             }
-            if (dist < 0.9f) dead = true;
 
-            // وميض الكشاف كلما اقترب المهرج
+            // الإمساك
+            if (!hidden && dist < 0.9f) { Die(cp); return; }
+            if (hidden)
+            {
+                if (Vector3.Distance(cp, wardrobePos[hideIdx]) < 2.0f) hiddenCatch += dt; else hiddenCatch = Math.Max(0, hiddenCatch - dt);
+                if (hiddenCatch > 2.5f) { hidden = false; playerPos = wardrobePos[hideIdx] + new Vector3(wardrobePos[hideIdx].X < 0 ? 1.0f : -1.0f, 0, 0); Die(cp); return; }
+            }
+
+            // صوت النبض + كشاف
+            if (iHeart != null) iHeart.Volume = MathUtil.Clamp(1f - dist / 13f, 0f, 1f);
             flicker += dt;
             var light = spot.Get<LightComponent>();
             if (Input.IsKeyPressed(Keys.F)) lightOn = !lightOn;
             if (lightOn) battery = Math.Max(0f, battery - 0.9f * dt);
             if (battery <= 0f) lightOn = false;
-            light.Intensity = !lightOn ? 0f : (dist < 6f && (int)(flicker * 12) % 3 == 0 ? 0.5f : 6f);
+            light.Intensity = (!lightOn || hidden) ? 0f : (dist < 6f && (int)(flicker * 12) % 3 == 0 ? 0.5f : 6f);
 
             // الفوز
-            if (collected == keys.Count && Math.Abs(playerPos.X) < 1f && playerPos.Z < -8.6f) won = true;
+            if (collected == keys.Count && Math.Abs(playerPos.X) < 1f && playerPos.Z < -8.6f) { won = true; }
 
-            DebugText.Print($"المفاتيح: {collected}/{keys.Count}  |  البطارية: {(int)battery}%  |  F كشاف - Shift جري (يجذب الوحش)", new Int2(20, 20));
-            if (collected == keys.Count) DebugText.Print("اذهب للباب الأخضر!", new Int2(20, 45));
+            DebugText.Print($"المستوى {level}  |  المفاتيح: {collected}/{keys.Count}  |  البطارية: {(int)battery}%", new Int2(20, 20));
+            DebugText.Print("WASD حركة - Shift جري (يجذب الوحش) - F كشاف - E اختباء", new Int2(20, 45));
+            if (hidden) DebugText.Print("أنت مختبئ... اضغط E للخروج", new Int2(20, 70));
+            else if (dist < 6f) DebugText.Print("!! الوحش قريب !!", new Int2(20, 70));
+            if (collected == keys.Count) DebugText.Print("اذهب للباب الأخضر!", new Int2(20, 95));
         }
     }
 }
