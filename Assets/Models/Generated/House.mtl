@@ -1,0 +1,30 @@
+newmtl floor
+Kd 0.235 0.157 0.118
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl ceil
+Kd 0.118 0.118 0.118
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl wall
+Kd 0.373 0.333 0.306
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl wood
+Kd 0.353 0.216 0.137
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl trim
+Kd 0.196 0.137 0.110
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+

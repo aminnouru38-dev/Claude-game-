@@ -1,0 +1,42 @@
+newmtl flesh
+Kd 0.345 0.306 0.329
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl bone
+Kd 0.804 0.776 0.714
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl black
+Kd 0.020 0.020 0.020
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl eye
+Kd 1.000 0.118 0.000
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl mouth
+Kd 0.275 0.000 0.047
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl tooth
+Kd 0.882 0.855 0.745
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl cloth
+Kd 0.125 0.094 0.102
+Ka 0 0 0
+Ks 0.05 0.05 0.05
+Ns 10
+
