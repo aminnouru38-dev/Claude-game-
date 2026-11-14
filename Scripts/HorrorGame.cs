@@ -16,6 +16,12 @@ namespace HorrorClown
     // ضع هذا السكربت على Entity فارغ في المشهد (Scene) الفارغ
     public class HorrorGame : SyncScript
     {
+        // ===== موديل المهرج (يظهر في Properties داخل Game Studio) =====
+        public float ClownHeight = 2.2f;              // الطول بالمتر (يتم ضبط الحجم تلقائياً)
+        public float ClownModelYawDegrees = 0f;       // جرّب 180 إذا الموديل مقلوب الاتجاه
+        bool usingCustomModel;
+        static readonly string[] ClownModelNames = { "Put_Clown_FBX/Clown", "Clown", "Monster" };
+
         const float WalkSpeed = 3.0f, RunSpeed = 5.0f, ClownSpeed = 3.2f, ClownChaseSpeed = 4.2f;
         const float PlayerR = 0.35f, ClownR = 0.5f, Sens = 0.0025f;
 
@@ -34,7 +40,7 @@ namespace HorrorClown
         readonly Vector3[] wardrobePos = { new Vector3(-8.5f, 0, -3f), new Vector3(8.5f, 0, 3f) };
         readonly Vector3[] batPos = { new Vector3(8, 0.5f, -8), new Vector3(-8, 0.5f, 2) };
         readonly List<Entity> bats = new List<Entity>(); readonly List<bool> batTaken = new List<bool>();
-        Sound sStep, sPickup, sScream; SoundInstance iHeart, iDrone;
+        Sound sStep, sPickup, sScream, sCreak; float ambTimer = 20f; SoundInstance iHeart, iDrone;
 
         Sound Snd(string n) => Content.Exists(n) ? Content.Load<Sound>(n) : null;
         void Sfx(Sound x) { if (x == null) return; var i = x.CreateInstance(); i.Play(); }
@@ -134,13 +140,22 @@ namespace HorrorClown
         void BuildClown()
         {
             clown = new Entity("Clown");
-            if (Content.Exists("Monster"))   // الوحش المستورد (Monster.obj) بدل المهرج
+            foreach (var name in ClownModelNames)
             {
-                var mm = new Entity("MonsterModel");
-                mm.Add(new ModelComponent(Content.Load<Model>("Monster")));
+                if (!Content.Exists(name)) continue;
+                var model = Content.Load<Model>(name);
+                var bb = model.BoundingBox;
+                float h = bb.Maximum.Y - bb.Minimum.Y;
+                float sc = h > 0.001f ? ClownHeight / h : 1f;       // ضبط الحجم تلقائياً
+                var mm = new Entity("ClownModel");
+                mm.Add(new ModelComponent(model));
+                mm.Transform.Scale = new Vector3(sc);
+                mm.Transform.Position = new Vector3(0, -bb.Minimum.Y * sc, 0);   // القدمان على الأرض
+                mm.Transform.Rotation = Quaternion.RotationY(MathUtil.DegreesToRadians(ClownModelYawDegrees));
                 clown.AddChild(mm);
                 clown.Add(new LightComponent { Type = new LightPoint { Radius = 4, Color = new ColorRgbProvider(new Color3(1f, 0.1f, 0.05f)) }, Intensity = 0.4f });
                 Entity.Scene.Entities.Add(clown);
+                usingCustomModel = true;
                 return;
             }
             var g = GraphicsDevice;
@@ -203,7 +218,7 @@ namespace HorrorClown
 
         void StartAudio()
         {
-            sStep = Snd("step"); sPickup = Snd("pickup"); sScream = Snd("scream");
+            sStep = Snd("step"); sPickup = Snd("pickup"); sScream = Snd("scream"); sCreak = Snd("creak");
             var drone = Snd("drone"); var heart = Snd("heartbeat");
             if (drone != null) { iDrone = drone.CreateInstance(); iDrone.IsLooping = true; iDrone.Volume = 0.5f; iDrone.Play(); }
             if (heart != null) { iHeart = heart.CreateInstance(); iHeart.IsLooping = true; iHeart.Volume = 0f; iHeart.Play(); }
@@ -378,6 +393,10 @@ namespace HorrorClown
                 if (hiddenCatch > 2.5f) { hidden = false; playerPos = wardrobePos[hideIdx] + new Vector3(wardrobePos[hideIdx].X < 0 ? 1.0f : -1.0f, 0, 0); Die(cp); return; }
             }
 
+            // أصوات بيت مسكون عشوائية
+            ambTimer -= dt;
+            if (ambTimer <= 0) { Sfx(sCreak); ambTimer = 15f + (float)rnd.NextDouble() * 20f; }
+
             // صوت النبض + كشاف
             if (iHeart != null) iHeart.Volume = MathUtil.Clamp(1f - dist / 13f, 0f, 1f);
             flicker += dt;
@@ -395,6 +414,7 @@ namespace HorrorClown
             if (hidden) DebugText.Print("أنت مختبئ... اضغط E للخروج", new Int2(20, 70));
             else if (dist < 6f) DebugText.Print("!! الوحش قريب !!", new Int2(20, 70));
             if (collected == keys.Count) DebugText.Print("اذهب للباب الأخضر!", new Int2(20, 95));
+            if (!usingCustomModel) DebugText.Print("ضع Clown.fbx في Assets/Put_Clown_FBX ليعتمد عليه اللعبة", new Int2(20, 120));
         }
     }
 }

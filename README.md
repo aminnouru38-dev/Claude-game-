@@ -25,3 +25,13 @@ WASD حركة | الماوس نظر | Shift جري (يجذب الوحش) | F ك�
 ## الموديلات
 - `Assets/Models/Generated`: مولّدة بالكود (`tools/generate_models.py`): Clown, House, Key, ExitDoor, Monster.
 - `Assets/Models/CC0`: حزم KayKit (Furniture, Halloween, Dungeon) و CC0Tree، رخصة CC0.
+
+## موديل المهرج (Put_Clown_FBX)
+ضع موديلك باسم `Clown.fbx` داخل `Assets/Put_Clown_FBX` (في Game Studio أيضاً بنفس اسم المجلد) والسكربت يعتمد عليه تلقائياً
+ويضبط حجمه وموضعه. التفاصيل في `Assets/Put_Clown_FBX/README.txt`.
+
+## مصادر الموديلات والأصوات (كلها CC0)
+- Kenney (furniture, graveyard, modular buildings, impact/rpg/digital audio) - مأخوذة من مستودع ETdoFresh/kenney.nl
+- KayKit (Furniture/Halloween/Dungeon) و CC0Tree
+- `Assets/Audio/Kenney_Picks`: creak, doorclose, step_wood, step_concrete, thud (أسماء جاهزة للاستيراد؛ `creak` يستعمله الكود)
+- `Assets/Audio/Kenney_All`: كل أصوات Kenney
