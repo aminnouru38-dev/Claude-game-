@@ -1,0 +1,64 @@
+
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Find Android project
+        id: project
+        shell: pwsh
+        run: |
+          $proj = Get-ChildItem -Path . -Filter *.csproj -Recurse |
+            Where-Object { $_.Name -match 'Android' } |
+            Select-Object -First 1
+
+          if (-not $proj) {
+            throw "No Android .csproj found. Enable Android platform in Stride project."
+          }
+
+          "path=$($proj.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Build APK
+        run: |
+          dotnet publish "${{ steps.project.outputs.path }}" `
+            -c Release `
+            -f net8.0-android `
+            -p:AndroidPackageFormat=apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stride-Android-APK
+          path: |
+            **/bin/Release/net8.0-android/publish/*.apk
+            **/bin/Release/net8.0-android/*.apk
+          if-no-files-found: error
+          
