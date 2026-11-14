@@ -35,3 +35,7 @@ WASD حركة | الماوس نظر | Shift جري (يجذب الوحش) | F ك�
 - KayKit (Furniture/Halloween/Dungeon) و CC0Tree
 - `Assets/Audio/Kenney_Picks`: creak, doorclose, step_wood, step_concrete, thud (أسماء جاهزة للاستيراد؛ `creak` يستعمله الكود)
 - `Assets/Audio/Kenney_All`: كل أصوات Kenney
+
+## البناء التلقائي (GitHub Actions)
+`.github/workflows/build.yml` يشتغل مع كل push: إذا في المستودع ملف `.sln` (من Game Studio) يبنيه Release،
+وإلا يفحص أن `Scripts/*.cs` تُترجم مع حزم Stride (`ci/ScriptCheck`). عدّل نسخة Stride في `ci/ScriptCheck/ScriptCheck.csproj` لتطابق نسختك.
