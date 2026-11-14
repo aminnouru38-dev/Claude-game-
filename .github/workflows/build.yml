@@ -1,5 +1,5 @@
 
-name: Build Android APK
+name: Build Stride Android APK
 
 on:
   push:
@@ -7,58 +7,89 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build-android:
+  build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup .NET
+      - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # Do not request the obsolete Android SDK "tools" package.
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          accept-android-sdk-licenses: true
 
-      - name: Install Android workload
+      - name: Install .NET Android workload
+        shell: pwsh
         run: dotnet workload install android
 
-      - name: Find Android project
-        id: project
+      - name: Check Android SDK
         shell: pwsh
         run: |
-          $proj = Get-ChildItem -Path . -Filter *.csproj -Recurse |
-            Where-Object { $_.Name -match 'Android' } |
+          Write-Host "Android SDK: $env:ANDROID_SDK_ROOT"
+          sdkmanager --version
+          adb version
+
+      - name: Restore solution
+        shell: pwsh
+        run: |
+          $sln = Get-ChildItem -Path . -Filter *.sln -Recurse -File |
             Select-Object -First 1
 
-          if (-not $proj) {
-            throw "No Android .csproj found. Enable Android platform in Stride project."
+          if (-not $sln) {
+            throw "No solution (.sln) found."
           }
 
-          "path=$($proj.FullName)" >> $env:GITHUB_OUTPUT
+          "SOLUTION=$($sln.FullName)" >> $env:GITHUB_ENV
+          dotnet restore $sln.FullName
 
-      - name: Build APK
+      - name: Build Android
+        shell: pwsh
         run: |
-          dotnet publish "${{ steps.project.outputs.path }}" `
+          dotnet build "$env:SOLUTION" `
             -c Release `
-            -f net8.0-android `
-            -p:AndroidPackageFormat=apk
+            --no-restore
 
-      - name: Upload APK
+      - name: Find APK files
+        id: apk
+        shell: pwsh
+        run: |
+          $apks = Get-ChildItem -Path . -Filter *.apk -Recurse -File |
+            Where-Object { $_.FullName -match 'bin[\\/]Release' }
+
+          if (-not $apks) {
+            throw "No APK found. Check that Android platform is enabled in the Stride project."
+          }
+
+          New-Item -ItemType Directory -Force -Path "out/apk" | Out-Null
+
+          foreach ($apk in $apks) {
+            Copy-Item $apk.FullName "out/apk/$($apk.Name)" -Force
+            Write-Host "Found APK: $($apk.FullName)"
+          }
+
+      - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
           name: Stride-Android-APK
-          path: |
-            **/bin/Release/net8.0-android/publish/*.apk
-            **/bin/Release/net8.0-android/*.apk
+          path: out/apk/*.apk
           if-no-files-found: error
+          retention-days: 14
           
